@@ -1,0 +1,1247 @@
+<!--
+  ============================================================
+  3D-ВЕЖА — завантаження .glb через файловий інпут
+  ============================================================
+  Користувач сам обирає файл моделі. Працює БЕЗ CORS і без
+  allowlist, бо файл читається локально (FileReader -> blob URL).
+
+  Підтримує Draco-стиснуті моделі (model_draco-2.glb).
+
+  Послідовність:
+    1. користувач кидає .glb у зону завантаження
+    2. GLTFLoader + DRACOLoader парсять модель
+    3. обходимо всі меші, друкуємо їхні назви у панель
+    4. зіставляємо назви з масивом квартир (твій API)
+    5. raycasting + підсвітка + картка
+  ============================================================
+-->
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volta SKAI — Krulli 10</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#fafaf8; --bg-card:#ffffff; --line:#e7e4dd; --line-soft:#f1eee7;
+    --ink:#2c2820; --ink-soft:#6c655a; --ink-mute:#a39d92;
+    --accent:#7e5a3c; --accent-soft:#b59373;
+    --sold:#b8b3a8; --booked:#c4a259;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;background:var(--bg);color:var(--ink);
+    font-family:'Inter',system-ui,-apple-system,sans-serif;overflow:hidden;
+    font-size:13px;line-height:1.45;}
+  #scene{position:fixed;inset:0;width:100vw;height:100vh;display:block;
+    background:var(--bg);}
+
+  /* ---------- HEADER ---------- */
+  header.top{position:fixed;top:0;left:0;right:0;height:64px;
+    background:var(--bg-card);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 28px;z-index:30;}
+  header.top .nav-left,header.top .nav-right{display:flex;align-items:center;gap:18px;
+    font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:var(--ink-soft);
+    cursor:pointer;}
+  header.top .nav-left .ico,header.top .nav-right .ico{
+    width:18px;height:12px;display:inline-flex;flex-direction:column;justify-content:space-between;}
+  header.top .nav-right .ico i{height:1.5px;background:var(--ink);display:block;}
+  header.top .brand{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    text-align:center;}
+  header.top .brand .small{font-size:9px;letter-spacing:3px;color:var(--ink-soft);
+    text-transform:uppercase;}
+  header.top .brand .big{font-family:'Cormorant Garamond',serif;font-size:24px;
+    letter-spacing:6px;font-weight:500;color:var(--ink);}
+
+  /* ---------- TITLE + TABS ---------- */
+  .title-wrap{position:fixed;top:64px;left:0;right:0;text-align:center;
+    padding:48px 0 28px;z-index:5;pointer-events:none;}
+  .title-wrap h1{font-family:'Cormorant Garamond',serif;font-weight:400;
+    font-size:64px;line-height:1;color:#c8c2b6;letter-spacing:.5px;}
+  .tabs{display:inline-flex;margin-top:28px;background:transparent;
+    border-radius:999px;padding:4px;pointer-events:auto;gap:4px;}
+  .tabs button{font:inherit;font-size:12px;letter-spacing:.3px;
+    background:transparent;border:none;color:var(--ink-soft);
+    padding:10px 22px;border-radius:999px;cursor:pointer;}
+  .tabs button.active{background:var(--accent);color:#fff;}
+
+  /* ---------- LEFT FILTERS ---------- */
+  aside.filters{position:fixed;left:24px;top:200px;width:240px;z-index:10;
+    color:var(--ink);font-size:12px;}
+  aside.filters .group{margin-bottom:22px;}
+  aside.filters .label{font-size:10px;letter-spacing:1.8px;text-transform:uppercase;
+    color:var(--ink-mute);margin-bottom:10px;}
+  aside.filters .checkbox{display:flex;align-items:center;gap:10px;font-size:12px;
+    cursor:pointer;user-select:none;}
+  aside.filters .checkbox input{appearance:none;width:18px;height:18px;
+    border:1.5px solid var(--ink-mute);border-radius:3px;cursor:pointer;
+    display:grid;place-items:center;}
+  aside.filters .checkbox input:checked{background:var(--accent);border-color:var(--accent);}
+  aside.filters .checkbox input:checked::after{content:'';width:6px;height:10px;
+    border-right:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(45deg) translate(-1px,-1px);}
+  aside.filters .pill-group{display:flex;flex-wrap:wrap;gap:6px;}
+  aside.filters .pill{padding:8px 14px;background:var(--bg-card);
+    border:1px solid var(--line);border-radius:4px;font-size:11px;cursor:pointer;
+    color:var(--ink-soft);transition:.15s;}
+  aside.filters .pill.active{background:#2c2820;color:#fff;border-color:#2c2820;}
+  aside.filters .pill:hover:not(.active){border-color:var(--accent-soft);color:var(--ink);}
+  aside.filters .range{margin-top:6px;}
+  aside.filters .range input{width:100%;}
+  aside.filters .range .vals{display:flex;justify-content:space-between;
+    font-size:11px;color:var(--ink-soft);margin-top:6px;}
+
+  /* ---------- RIGHT TABLE ---------- */
+  aside.table-panel{position:fixed;right:0;top:64px;bottom:0;width:400px;
+    background:var(--bg-card);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;z-index:10;}
+  .table-head{display:grid;grid-template-columns:44px 40px 40px 56px 56px 1fr;
+    padding:14px 18px;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--ink-mute);border-bottom:1px solid var(--line);gap:6px;}
+  .table-head span:last-child{text-align:right;}
+  .table-body{flex:1;overflow-y:auto;}
+  .row{display:grid;grid-template-columns:44px 40px 40px 56px 56px 1fr;
+    padding:13px 18px;font-size:13px;border-bottom:1px solid var(--line-soft);
+    cursor:pointer;transition:background .12s;gap:6px;align-items:center;}
+  .row:hover{background:#f5f2eb;}
+  .row.hl{background:#eee6d8;}
+  .row.sold,.row.booked{color:var(--ink-mute);}
+  .row .nr{font-weight:600;color:var(--ink);}
+  .row.sold .nr,.row.booked .nr{color:var(--ink-mute);}
+  .row .price{text-align:right;font-weight:500;}
+  .row.sold .price,.row.booked .price{color:var(--ink-mute);}
+
+  /* ---------- PROGRESS / DROP (приховані по дефолту) ---------- */
+  #drop{position:fixed;inset:0;display:none;align-items:center;
+    justify-content:center;flex-direction:column;gap:18px;
+    background:rgba(250,250,248,.96);z-index:40;}
+  #drop:not(.hidden){display:flex;}
+  #drop.hidden{display:none;}
+  #dropzone{width:420px;padding:46px 30px;border:2px dashed var(--line);
+    border-radius:8px;text-align:center;cursor:pointer;background:#fff;}
+  #dropzone h2{font-size:18px;margin-bottom:8px;}
+  #dropzone p{font-size:13px;color:var(--ink-soft);line-height:1.6;}
+  #dropzone .pick{display:inline-block;margin-top:16px;padding:10px 22px;
+    background:var(--accent);color:#fff;border-radius:4px;
+    font-size:12px;font-weight:600;letter-spacing:.5px;}
+  #file{display:none;}
+  #progress{position:fixed;inset:0;display:none;align-items:center;
+    justify-content:center;flex-direction:column;gap:14px;
+    background:rgba(250,250,248,.96);z-index:45;}
+  #progress.show{display:flex;}
+  #bar{width:280px;height:3px;background:var(--line);border-radius:2px;overflow:hidden;}
+  #bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s;}
+  #progress .pct{font-size:12px;color:var(--ink-soft);letter-spacing:.5px;}
+  #progress code{font-size:11px;background:#f4f0e8;padding:8px 12px;
+    border-radius:4px;color:#b03c3c;max-width:520px;word-break:break-all;}
+
+  /* ---------- CARD (hover tooltip 3D) ---------- */
+  #card{position:fixed;z-index:20;width:220px;background:var(--bg-card);
+    color:var(--ink);border-radius:4px;padding:16px 18px;
+    box-shadow:0 16px 44px rgba(0,0,0,.12);border:1px solid var(--line);
+    opacity:0;transform:translateY(6px);transition:.14s;pointer-events:none;}
+  #card.show{opacity:1;transform:translateY(0);}
+  #card .nr{font-size:22px;font-weight:600;font-family:'Cormorant Garamond',serif;}
+  #card .badge{display:inline-block;margin-top:6px;font-size:10px;letter-spacing:1.3px;
+    text-transform:uppercase;padding:3px 10px;border-radius:99px;color:#fff;}
+  #card .badge.available{background:var(--accent);}
+  #card .badge.booked{background:var(--booked);}
+  #card .badge.sold{background:var(--sold);}
+  #card .badge.unknown{background:var(--ink-mute);}
+  #card .rows{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+  #card .r{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;}
+  #card .r span:first-child{color:var(--ink-soft);}
+  #card .r span:last-child{font-weight:600;}
+  #card .price{margin-top:8px;font-size:16px;font-weight:600;}
+
+  /* ---------- STATUS / RELOAD ---------- */
+  #status-bar{position:fixed;left:24px;bottom:18px;font-size:11px;
+    color:var(--ink-mute);z-index:10;}
+  #reload{display:none;}
+
+  /* hide стара діагностика */
+  #meshes{display:none !important;}
+
+  /* ---------- APARTMENT MODAL ---------- */
+  #apt-modal{position:fixed;inset:0;background:rgba(20,18,14,.55);z-index:60;
+    display:none;align-items:center;justify-content:center;}
+  #apt-modal.show{display:flex;}
+  #apt-modal .dialog{position:relative;width:min(1100px,95vw);height:min(80vh,800px);
+    background:var(--bg-card);border-radius:6px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.35);display:flex;flex-direction:column;}
+  #apt-modal .head{padding:18px 24px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;gap:24px;}
+  #apt-modal .head .title{font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--ink);}
+  #apt-modal .head .meta{display:flex;gap:24px;font-size:12px;color:var(--ink-soft);}
+  #apt-modal .head .meta b{display:block;color:var(--ink);font-size:14px;font-weight:600;margin-top:2px;}
+  #apt-modal .close{background:transparent;border:none;font-size:24px;color:var(--ink-soft);
+    cursor:pointer;line-height:1;padding:4px 10px;}
+  #apt-modal .close:hover{color:var(--ink);}
+  #apt-modal .body{flex:1;position:relative;background:#f1eee7;}
+  #apt-canvas{width:100%;height:100%;display:block;}
+  #apt-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:var(--ink-soft);letter-spacing:1px;text-transform:uppercase;}
+  #apt-loading.hidden{display:none;}
+  .row{cursor:pointer;}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="nav-left"><span class="ico">📞</span> Contact us</div>
+  <div class="brand">
+    <div class="small">Volta</div>
+    <div class="big">SKAI</div>
+  </div>
+  <div class="nav-right">Menu <span class="ico"><i></i><i></i></span></div>
+</header>
+
+<div class="title-wrap">
+  <h1>Krulli 10</h1>
+  <div class="tabs">
+    <button class="active">360 model</button>
+    <button>Floorplans</button>
+    <button>Location</button>
+  </div>
+</div>
+
+<aside class="filters">
+  <div class="group">
+    <label class="checkbox">
+      <input type="checkbox" id="f-available">
+      Only available units
+    </label>
+  </div>
+
+  <div class="group">
+    <div class="label">Units</div>
+    <div class="pill-group" id="f-units">
+      <div class="pill active" data-units="all">All</div>
+      <div class="pill" data-units="apartments">Apartments</div>
+      <div class="pill" data-units="commercial">Commercial</div>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="label">Rooms</div>
+    <div class="pill-group" id="f-rooms">
+      <div class="pill active" data-rooms="all">All</div>
+      <div class="pill" data-rooms="1">1</div>
+      <div class="pill" data-rooms="2">2</div>
+      <div class="pill" data-rooms="3">3</div>
+      <div class="pill" data-rooms="4">4</div>
+      <div class="pill" data-rooms="5">5</div>
+    </div>
+  </div>
+
+  <div class="group">
+    <div class="label">Floors</div>
+    <div class="range">
+      <input type="range" min="1" max="12" value="1" id="f-floor-min">
+      <input type="range" min="1" max="12" value="12" id="f-floor-max">
+      <div class="vals"><span id="floor-min-v">1</span><span id="floor-max-v">12</span></div>
+    </div>
+  </div>
+</aside>
+
+<canvas id="scene"></canvas>
+
+<aside class="table-panel">
+  <div class="table-head">
+    <span>Nr</span><span>Flr</span><span>Rms</span><span>Size</span><span>Balc</span><span>Price</span>
+  </div>
+  <div class="table-body" id="apt-table"></div>
+</aside>
+
+<!-- Drop / progress (fallback) -->
+<div id="drop" class="hidden">
+  <div id="dropzone">
+    <h2>Local .glb</h2>
+    <p>Drop a model or click to pick.</p>
+    <div class="pick">Pick file</div>
+  </div>
+  <input type="file" id="file" accept=".glb,.gltf" />
+</div>
+<div id="progress">
+  <div class="pct" id="pct">Loading…</div>
+  <div id="bar"><i></i></div>
+  <code id="errcode" style="display:none"></code>
+</div>
+
+<!-- Hover card -->
+<div id="card">
+  <div class="nr">—</div>
+  <div class="badge unknown">—</div>
+  <div class="rows">
+    <div class="r"><span>Floor</span><span class="c-floor">—</span></div>
+    <div class="r"><span>Rooms</span><span class="c-rooms">—</span></div>
+    <div class="r"><span>Size</span><span class="c-size">—</span></div>
+  </div>
+  <div class="price c-price">—</div>
+</div>
+
+<div id="apt-modal">
+  <div class="dialog">
+    <div class="head">
+      <div>
+        <div class="title" id="apt-modal-title">Apartment</div>
+      </div>
+      <div class="meta">
+        <div>Floor<b id="apt-modal-floor">—</b></div>
+        <div>Rooms<b id="apt-modal-rooms">—</b></div>
+        <div>Size<b id="apt-modal-size">—</b></div>
+        <div>Price<b id="apt-modal-price">—</b></div>
+      </div>
+      <button class="close" id="apt-modal-close">×</button>
+    </div>
+    <div class="body">
+      <canvas id="apt-canvas"></canvas>
+      <div id="apt-loading">Loading apartment…</div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">…</div>
+<button id="reload">Reload</button>
+
+<!-- legacy panel container kept (hidden via CSS) -->
+<div id="meshes"><div id="mesh-list"></div></div>
+
+<script src="apartments.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader }  from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ============================================================
+   КРОК 1. ДАНІ ПРОЄКТУ (URL моделі + квартири)
+   ------------------------------------------------------------
+   Формат відповідає API Volta SKAI. У реальному проєкті це
+   приходить з fetch — тут вписано приклад.
+   ============================================================ */
+const MODEL_URL = 'model_draco-2.glb';
+const TEX_DIR = 'textures/';
+const HOUSE_ID = 40;  // Krulli 10 (модель towerA)
+
+// дані з apartments.js (інлайн, без fetch)
+const ALL_APARTMENTS = window.APARTMENTS_DATA || [];
+const apartments = ALL_APARTMENTS.filter(a => a.house && a.house.id === HOUSE_ID);
+
+/* ------------------------------------------------------------
+   Матчинг меша apartment_* з даними квартири.
+   Логіка з оригіналу: останній токен після "_" — це number_num
+   (parseFloat). Додатково пробуємо number та id.
+   ------------------------------------------------------------ */
+function findApartmentForMesh(meshName) {
+  if (!meshName) return null;
+  const parts = meshName.split('_');
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1];
+  const lastFloat = parseFloat(last);
+  return apartments.find(a =>
+    (a.number_num != null && parseFloat(a.number_num) === lastFloat) ||
+    String(a.number).toLowerCase() === last.toLowerCase() ||
+    String(a.id) === last
+  ) || null;
+}
+
+/* ============================================================
+   КРОК 2. СЦЕНА
+   ============================================================ */
+const canvas = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xfafaf8);
+
+let camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 2000);
+camera.position.set(10, 8, 14);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const sun = new THREE.DirectionalLight(0xffe9c8, 1.6);
+sun.position.set(20, 30, 15);
+sun.castShadow = true;
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0x6a8fc0, 0.5);
+rim.position.set(-15, 8, -15);
+scene.add(rim);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.5;
+
+/* ============================================================
+   КРОК 3. ЗАВАНТАЖЕННЯ .glb
+   ------------------------------------------------------------
+   DRACOLoader потрібен, бо модель стиснута (model_draco-2.glb).
+   Декодер — wasm-файл з CDN. setDecoderConfig({type:'js'}) як
+   запасний варіант, якщо wasm не пройде.
+   ============================================================ */
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+
+const loader = new GLTFLoader();
+loader.setDRACOLoader(draco);
+
+const apartmentMeshes = [];           // клікабельні меші-квартири
+let modelRoot = null;
+
+/* ============================================================
+   КРОК 2b. ТЕКСТУРИ + МАТЕРІАЛИ
+   ------------------------------------------------------------
+   Точний порт логіки з voltaskai/three-d.js:
+     - ключі словника materials[] = імена мешів у lowercase
+     - спецобробка env / shadow / bronze / tree*
+     - ручні fallback-матеріали (frames, glass, dull, …)
+   ============================================================ */
+const TEXTURE_FILES = [
+  'abalconyconc.jpg','aterrace.jpg','awhitewalls.jpg',
+  'billboard_001.jpg','billboard_002.jpg','bronze.jpg','ceiling_022.jpg',
+  'env.jpg','girl.jpg','grassproject.jpg','jacuzzi.jpg','landscape.jpg',
+  'lsbits.jpg','outdoorarmchair.jpg','outdoorsofa.jpg','outdoortable.jpg',
+  'playground.jpg','podiumblack.jpg','podiumconc.jpg','shadow.png',
+  'soil.jpg','terrace.jpg','towerablack.jpg','toweraceiling.jpg',
+  'towerafloorplates.jpg','towerblack.jpg',
+  'tree002.jpg','tree002a.jpg','tree003.jpg','tree003a.jpg',
+  'tree004.jpg','tree004a.jpg','tree005.jpg','tree005a.jpg',
+  'tree006.jpg','tree006a.jpg','tree007.jpg','tree007a.jpg',
+  'tree008.jpg','tree008a.jpg','tree009.jpg','tree009a.jpg',
+  'tree010.jpg','tree010a.jpg'
+];
+
+const materials = {};
+const texLoader = new THREE.TextureLoader();
+const TREE_BASE = /^(tree\d+|bush03)$/;     // tree002, tree009, bush03 …
+const TREE_ALPHA = /^(tree\d+a|bush03a)$/;  // парна *a — альфа
+
+function addTextureDefaultMeshSettings(tex, type='basic', channel=0) {
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1,1);
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 100;
+  if (channel) tex.channel = channel;
+  if (type === 'basic')    return new THREE.MeshBasicMaterial({ map: tex });
+  if (type === 'standard') return new THREE.MeshStandardMaterial({ map: tex });
+}
+
+function loadTextures() {
+  TEXTURE_FILES.forEach(filename => {
+    const url = TEX_DIR + filename;
+    const base = filename.split('.')[0];            // "tree002a"
+    const baseLower = base.toLowerCase();
+    // якщо ім'я закінчується на "-X" (варіант) — alias без суфікса
+    const alias = (base.length >= 2 && base.charAt(base.length-2) === '-')
+      ? base.substring(0, base.length-2) : base;
+    const tex = texLoader.load(url);
+
+    if (filename.startsWith('env')) {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      materials.env = tex;
+      if (materials.glass) {
+        materials.glass.envMap = tex;
+        materials.glass.envMapIntensity = 2;
+      }
+    } else if (filename.startsWith('shadow')) {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1,1);
+      tex.flipY = false;
+      tex.channel = 0;
+      materials.shadowAlpha = tex;
+    } else if (filename.startsWith('bronze')) {
+      materials.bronze = addTextureDefaultMeshSettings(tex, 'standard');
+      materials.bronze.roughness = 0.2;
+      materials.bronze.metalness = 0.25;
+    } else if (TREE_BASE.test(baseLower)) {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1,1);
+      tex.flipY = false;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      materials[baseLower] = new THREE.MeshBasicMaterial({
+        map: tex, alphaTest: 0.5, transparent: true, side: THREE.DoubleSide
+      });
+    } else if (TREE_ALPHA.test(baseLower)) {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1,1);
+      tex.flipY = false;
+      const stem = baseLower.substring(0, baseLower.length-1); // tree002a -> tree002
+      if (materials[stem]) materials[stem].alphaMap = tex;
+    } else {
+      const channel = filename.includes('billboard') ? 0 : 0;
+      materials[baseLower] = addTextureDefaultMeshSettings(tex, 'basic', channel);
+      if (alias !== base) materials[alias.toLowerCase()] = materials[baseLower];
+    }
+  });
+
+  // ручні матеріали (декоративні, без текстур)
+  materials.shadow = new THREE.MeshBasicMaterial({
+    color: 0x000000, transparent: true, opacity: 1,
+    alphaMap: materials.shadowAlpha || null, alphaTest: 0,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+  materials.dull       = new THREE.MeshBasicMaterial({ color: 0xDBE0DB, side: THREE.DoubleSide });
+  materials.greyfacade = new THREE.MeshBasicMaterial({ color: 0x2E2E2E, side: THREE.DoubleSide, opacity: 1 });
+  materials.white      = new THREE.MeshStandardMaterial({ color: 0xEDEDED, metalness: 0.2, roughness: 0.8, side: THREE.DoubleSide });
+  materials.frames     = new THREE.MeshStandardMaterial({ color: 0x383838, side: THREE.DoubleSide, opacity: 1, roughness: 0.2, metalness: 0.5 });
+  materials.aptglass   = new THREE.MeshBasicMaterial({ color: 0xDCE0E3, transparent: true, opacity: 0.3,
+                                                       envMap: materials.env || null, depthWrite: false, side: THREE.DoubleSide });
+  materials.glass      = new THREE.MeshBasicMaterial({ color: 0xC3CCD4, transparent: true, opacity: 0.85,
+                                                       envMap: materials.env || null, depthWrite: false, side: THREE.DoubleSide });
+  materials.podglaz    = new THREE.MeshStandardMaterial({ color: 0xA3B3BF, metalness: 0.75, roughness: 0.5,
+                                                          transparent: true, opacity: 0.5,
+                                                          envMap: materials.env || null, envMapIntensity: 1,
+                                                          depthWrite: false, side: THREE.DoubleSide });
+  materials.podiumglaz = new THREE.MeshStandardMaterial({ color: 0xA3B3BF, metalness: 0.75, roughness: 0.5,
+                                                          transparent: true, opacity: 0.5,
+                                                          envMapIntensity: 1, depthWrite: false, side: THREE.DoubleSide });
+  materials.pots       = new THREE.MeshStandardMaterial({ color: 0x474747, side: THREE.DoubleSide });
+  materials.ghost      = new THREE.MeshBasicMaterial({ color: 0xE6EBED, side: THREE.BackSide, transparent: true, opacity: 0.5 });
+}
+loadTextures();
+
+/* ============================================================
+   Призначення матеріалів на меші (порт applyMaterialsToModel).
+   Повертає {applied, missed, hidden} для діагностики.
+   ============================================================ */
+function applyMaterialsToModel(root) {
+  let applied = 0, missed = 0, hidden = 0;
+  const missing = new Set();
+  root.traverse(s => {
+    let name = s.name;
+    if (!name || !s.isMesh) return;
+
+    if (name.includes('GHOST_')) { s.visible = false; hidden++; return; }
+    if (['building_podium','building_towera','building_towerb'].includes(name.toLowerCase())) {
+      s.visible = false; hidden++; return;
+    }
+
+    if (name.includes('BILLBOARD')) {
+      s.onBeforeRender = function (renderer, scene, cam) { s.lookAt(cam.position); };
+    } else if (name.startsWith('TREE')) {
+      name = name.split('_')[0].toLowerCase();  // TREE002_LOD0 -> tree002
+    }
+
+    const lower = name.toLowerCase();
+    if (lower.includes('apartment_')) return; // обробляється окремо нижче
+
+    if (materials[lower])              { s.material = materials[lower]; applied++; }
+    else if (name.includes('FRAMES'))  { s.material = materials.frames; applied++; }
+    else if (name.startsWith('AGLASS')){ s.material = materials.aptglass; applied++; }
+    else if (name.includes('GLASS'))   { s.material = materials.glass; applied++; }
+    else if (name.includes('PODGLAZ')) { s.material = materials.podglaz; applied++; }
+    else if (name === 'BLACKFACADE')   { s.material = materials.greyfacade; applied++; }
+    else if (name === 'LOGO')          { s.material = materials.white; applied++; }
+    else if (name.includes('STUFF') || name === 'TABLE' || name === 'DECK') {
+      s.material = materials.dull; applied++;
+    } else {
+      missed++; missing.add(s.name);
+    }
+  });
+  if (missing.size) console.log('No material for:', [...missing].slice(0, 30));
+  return { applied, missed, hidden };
+}
+
+function loadModel(url) {
+  showProgress();
+  loader.load(url,
+    // --- успіх ---
+    (gltf) => {
+      modelRoot = gltf.scene;
+
+      let total = 0, matched = 0;
+      const meshNames = [];
+
+      // 1) спочатку призначаємо матеріали за патерном з оригіналу
+      const matStats = applyMaterialsToModel(modelRoot);
+
+      // 2) потім обробляємо квартирні меші (apartment_*) для hover-картки
+      modelRoot.traverse((obj) => {
+        if (!obj.isMesh) return;
+        total++;
+        meshNames.push(obj.name || '(без назви)');
+
+        const lower = (obj.name || '').toLowerCase();
+        if (!lower.includes('apartment_')) return;
+
+        const apt = findApartmentForMesh(obj.name);
+        if (!apt) { obj.visible = false; return; }
+
+        matched++;
+        // прозорий overlay для hover-картки (як в оригіналі)
+        obj.material = new THREE.MeshStandardMaterial({
+          color: 0xffffff, transparent: true, opacity: 0,
+          depthTest: false, depthWrite: false
+        });
+        obj.renderOrder = 2;
+        obj.userData = { apt, origOpacity: 0 };
+        apartmentMeshes.push(obj);
+      });
+
+      scene.add(modelRoot);
+      frameModel(modelRoot);
+      fillMeshPanel(meshNames);
+      buildTable();
+
+      document.getElementById('status-bar').textContent =
+        `${matched} apartments · ${matStats.applied} materials`;
+      hideProgress();
+
+      if (matched === 0) {
+        document.getElementById('status-bar').textContent +=
+          ' — жоден меш не збігся. Дивись назви у панелі зліва.';
+      }
+    },
+    // --- прогрес ---
+    (e) => {
+      if (e.lengthComputable) {
+        const p = Math.round(e.loaded / e.total * 100);
+        document.querySelector('#bar i').style.width = p + '%';
+        document.getElementById('pct').textContent = 'Завантаження… ' + p + '%';
+      }
+    },
+    // --- помилка ---
+    (err) => {
+      showError(err.message || String(err));
+    }
+  );
+}
+
+/* підлаштувати камеру, щоб модель повністю влізла в кадр */
+function frameModel(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const dist = maxDim / (2 * Math.tan(Math.PI * camera.fov / 360));
+
+  controls.target.copy(center);
+  camera.position.set(center.x + dist*0.9, center.y + dist*0.5,
+                      center.z + dist*0.9);
+  camera.near = maxDim / 100;
+  camera.far  = maxDim * 100;
+  camera.updateProjectionMatrix();
+  controls.minDistance = maxDim * 0.3;
+  controls.maxDistance = maxDim * 3;
+  controls.update();
+}
+
+/* ============================================================
+   КРОК 4. RAYCASTING + ПІДСВІТКА
+   ============================================================ */
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let hovered = null;
+const card = document.getElementById('card');
+
+function setHL(mesh, on) {
+  if (!mesh) return;
+  const m = mesh.material;
+  if (on) {
+    const st = mesh.userData.apt && mesh.userData.apt.status;
+    if (st === 'booked' || st === 'sold') {
+      m.color.set('#e3cdbb'); m.opacity = 0.8;
+    } else {
+      m.color.set('#B0734E'); m.opacity = 0.6;
+    }
+  } else {
+    m.color.set('#ffffff'); m.opacity = 0;
+  }
+}
+
+function onMove(e) {
+  pointer.x = (e.clientX/innerWidth)*2 - 1;
+  pointer.y = -(e.clientY/innerHeight)*2 + 1;
+  card.style.left = (e.clientX + 18) + 'px';
+  card.style.top  = (e.clientY + 18) + 'px';
+
+  if (!apartmentMeshes.length) return;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(apartmentMeshes, true);
+  const hit = hits.length ? hits[0].object : null;
+
+  if (hit !== hovered) {
+    if (hovered) {
+      setHL(hovered, false);
+      const oldRow = aptTable.querySelector(`[data-apt-id="${hovered.userData.apt.id}"]`);
+      if (oldRow) oldRow.classList.remove('hl');
+    }
+    hovered = hit;
+    if (hovered) {
+      setHL(hovered, true);
+      fillCard(hovered.userData.apt);
+      card.classList.add('show');
+      canvas.style.cursor = 'pointer';
+      controls.autoRotate = false;
+      const row = aptTable.querySelector(`[data-apt-id="${hovered.userData.apt.id}"]`);
+      if (row) {
+        row.classList.add('hl');
+        row.scrollIntoView({block:'nearest', behavior:'smooth'});
+      }
+    } else {
+      card.classList.remove('show');
+      canvas.style.cursor = 'grab';
+      controls.autoRotate = true;
+    }
+  }
+}
+canvas.addEventListener('pointermove', onMove);
+canvas.addEventListener('click', () => {
+  if (hovered && hovered.userData.apt) openApartmentModal(hovered.userData.apt);
+});
+
+const val = v => (v == null || v === '') ? '—' : v;
+function fillCard(a) {
+  card.querySelector('.nr').textContent = a.number;
+  card.querySelector('.c-floor').textContent = val(a.floor);
+  card.querySelector('.c-rooms').textContent = val(a.rooms_count);
+  card.querySelector('.c-size').textContent  = val(a.area_size);
+  card.querySelector('.c-price').textContent = val(a.price_formatted);
+  const b = card.querySelector('.badge');
+  b.className = 'badge ' + (a.status ?? 'unknown');
+  b.textContent = a.status ?? 'Available';
+}
+
+/* ============================================================
+   ТАБЛИЦЯ КВАРТИР (правий сайдбар) + sync з 3D
+   ============================================================ */
+const aptTable = document.getElementById('apt-table');
+const filters = { available: false, units: 'all', rooms: 'all', floorMin: 1, floorMax: 12 };
+
+function fmtSize(s) {
+  if (!s) return '-';
+  return String(s).replace(/\s*m²?\s*$/i,'').trim();
+}
+function fmtPrice(a) {
+  const p = a.price_formatted || '-';
+  if (!a.status) return p;
+  if (a.status === 'sold') return 'Sold';
+  if (a.status === 'booked') return 'Booked';
+  return p;
+}
+
+function passesFilter(a) {
+  if (filters.available && a.status !== 'available') return false;
+  if (filters.rooms !== 'all' && String(a.rooms_count || '') !== filters.rooms) return false;
+  const f = parseInt(a.floor || a.min_floor || 0, 10);
+  if (f && (f < filters.floorMin || f > filters.floorMax)) return false;
+  return true;
+}
+
+function buildTable() {
+  const sorted = [...apartments].sort((a,b) => {
+    const fa = parseFloat(a.number_num)||0, fb = parseFloat(b.number_num)||0;
+    return fa - fb;
+  });
+  aptTable.innerHTML = '';
+  sorted.forEach(a => {
+    if (!passesFilter(a)) return;
+    const row = document.createElement('div');
+    row.className = 'row' + (a.status === 'sold' ? ' sold' : a.status === 'booked' ? ' booked' : '');
+    row.dataset.aptId = a.id;
+    row.innerHTML = `
+      <span class="nr">${a.number || '-'}</span>
+      <span>${a.floor || '-'}</span>
+      <span>${a.rooms_count ?? '-'}</span>
+      <span>${fmtSize(a.area_size)}</span>
+      <span>${fmtSize(a.balcony_size)}</span>
+      <span class="price">${fmtPrice(a)}</span>
+    `;
+    row.addEventListener('mouseenter', () => highlightApartment(a, true));
+    row.addEventListener('mouseleave', () => highlightApartment(a, false));
+    row.addEventListener('click', () => openApartmentModal(a));
+    aptTable.appendChild(row);
+  });
+}
+
+function highlightApartment(apt, on) {
+  // знайти меш цієї квартири
+  const mesh = apartmentMeshes.find(m => m.userData.apt && m.userData.apt.id === apt.id);
+  if (mesh) {
+    setHL(mesh, on);
+    hovered = on ? mesh : null;
+  }
+  // підсвітити рядок
+  const row = aptTable.querySelector(`[data-apt-id="${apt.id}"]`);
+  if (row) row.classList.toggle('hl', on);
+  if (on) {
+    fillCard(apt);
+    card.classList.add('show');
+    controls.autoRotate = false;
+  } else {
+    card.classList.remove('show');
+    controls.autoRotate = true;
+  }
+}
+
+// прослуховування фільтрів
+document.getElementById('f-available').addEventListener('change', e => {
+  filters.available = e.target.checked; buildTable();
+});
+document.getElementById('f-rooms').addEventListener('click', e => {
+  const p = e.target.closest('.pill'); if (!p) return;
+  document.querySelectorAll('#f-rooms .pill').forEach(x => x.classList.remove('active'));
+  p.classList.add('active');
+  filters.rooms = p.dataset.rooms; buildTable();
+});
+document.getElementById('f-units').addEventListener('click', e => {
+  const p = e.target.closest('.pill'); if (!p) return;
+  document.querySelectorAll('#f-units .pill').forEach(x => x.classList.remove('active'));
+  p.classList.add('active');
+  filters.units = p.dataset.units; buildTable();
+});
+const fMin = document.getElementById('f-floor-min'), fMax = document.getElementById('f-floor-max');
+const fMinV = document.getElementById('floor-min-v'), fMaxV = document.getElementById('floor-max-v');
+function syncFloors() {
+  let a = +fMin.value, b = +fMax.value;
+  if (a > b) [a,b] = [b,a];
+  filters.floorMin = a; filters.floorMax = b;
+  fMinV.textContent = a; fMaxV.textContent = b;
+  buildTable();
+}
+fMin.addEventListener('input', syncFloors);
+fMax.addEventListener('input', syncFloors);
+
+/* ============================================================
+   КРОК 5. ПАНЕЛЬ НАЗВ МЕШІВ (діагностика)
+   ------------------------------------------------------------
+   Показує реальні назви всіх мешів моделі. Зелені — ті, що
+   зіставилися з API. Якщо всі сірі — треба підправити
+   matchApartment() під реальну схему іменування.
+   ============================================================ */
+function fillMeshPanel(names) {
+  const list = document.getElementById('mesh-list');
+  list.innerHTML = '';
+  // унікальні назви
+  [...new Set(names)].sort().forEach(name => {
+    const div = document.createElement('div');
+    div.textContent = name;
+    if (name.toLowerCase().includes('apartment_') && findApartmentForMesh(name)) {
+      div.classList.add('matched');
+    }
+    list.appendChild(div);
+  });
+  document.getElementById('meshes').classList.add('show');
+}
+
+/* ============================================================
+   КРОК 6. UI: drag&drop, інпут, прогрес, помилки
+   ============================================================ */
+const dropEl = document.getElementById('drop');
+const zone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file');
+
+zone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+['dragenter','dragover'].forEach(ev =>
+  dropEl.addEventListener(ev, e => {
+    e.preventDefault(); zone.classList.add('over');
+  }));
+['dragleave','drop'].forEach(ev =>
+  dropEl.addEventListener(ev, e => {
+    e.preventDefault(); zone.classList.remove('over');
+  }));
+dropEl.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+
+function handleFile(file) {
+  if (!/\.(glb|gltf)$/i.test(file.name)) {
+    alert('Потрібен файл .glb або .gltf');
+    return;
+  }
+  // FileReader -> blob URL: файл стає доступним як локальна "адреса",
+  // GLTFLoader вантажить його без жодної мережі
+  const url = URL.createObjectURL(file);
+  dropEl.classList.add('hidden');
+  loadModel(url);
+}
+
+function showProgress() {
+  document.getElementById('progress').classList.add('show');
+  document.getElementById('progress').classList.remove('error');
+  document.getElementById('errcode').style.display = 'none';
+  document.querySelector('#bar i').style.width = '0%';
+}
+function hideProgress() {
+  document.getElementById('progress').classList.remove('show');
+  document.getElementById('reload').style.display = 'block';
+}
+function showError(msg) {
+  const p = document.getElementById('progress');
+  p.classList.add('show','error');
+  document.getElementById('pct').textContent =
+    'Не вдалося завантажити модель (можливо CORS). Обери .glb локально:';
+  const c = document.getElementById('errcode');
+  c.style.display = 'block';
+  c.textContent = msg;
+  // повертаємо файловий інпут як fallback
+  setTimeout(() => {
+    p.classList.remove('show','error');
+    dropEl.classList.remove('hidden');
+  }, 2500);
+}
+
+document.getElementById('reload').addEventListener('click', () => {
+  location.reload();
+});
+
+/* ============================================================
+   АВТОЗАВАНТАЖЕННЯ моделі з MODEL_URL.
+   Якщо CORS блокує — лишається стартовий екран із файловим інпутом.
+   ============================================================ */
+(function autoload() {
+  if (!MODEL_URL) return;
+  dropEl.classList.add('hidden');
+  document.getElementById('status-bar').textContent =
+    apartments.length + ' apartments · loading model…';
+  loadModel(MODEL_URL);
+})();
+
+/* ============================================================
+   APARTMENT MODAL: окрема сцена + .glb квартири
+   ============================================================ */
+const APARTMENT_MODEL_URL = 'apartment_073_draco.glb';
+const APT_TEX_BASE = 'https://wsrv.nl/?url=https%3A%2F%2Fvoltaskai.endover.ee%2Fwp-content%2Fuploads%2F2025%2F09%2F';
+const APT_HOUSE_TEX_BASE = 'https://wsrv.nl/?url=https%3A%2F%2Fvoltaskai.endover.ee%2Fwp-content%2Fuploads%2F2025%2F10%2F';
+const APT_TEX_SUFFIX = '.jpg&quality=90&output=webp';
+const APT_TEXTURE_NAMES = [
+  'aptglaz','armchair-3','armchairsbedroom','bath','bathroom-5','bathroomsink-5',
+  'bathroomvanity','baxtertable','bedmain-5','bedmedium-2','bubbles','carpet-5',
+  'carpetbig','chair-5','coffeetables-5','deckchair','doors-5','facade-5',
+  'floor-5','floortiles-5','frontdoor-5','galotti-3','hottub','interior-doors',
+  'kitchenbench-5','kitchencarcass-5','kitchendoors-5','outdoorarmchair-5',
+  'outdoorcoffeetable-3','outdoortable-1','plant-5','pot-5','skirting-5',
+  'stool-4','tiles-1','toilet-5','umbrella','walls-5','wardrobecarcass-5',
+  'wardrobedoors-5'
+];
+const APT_HOUSE_TEXTURE_NAMES = ['env-1','girl'];
+
+const aptModal = document.getElementById('apt-modal');
+const aptCanvas = document.getElementById('apt-canvas');
+const aptLoading = document.getElementById('apt-loading');
+let aptRenderer = null, aptScene = null, aptCamera = null, aptControls = null;
+let aptModelRoot = null, aptMaterials = null;
+let aptRAF = null;
+
+function initAptScene() {
+  if (aptRenderer) return;
+  aptRenderer = new THREE.WebGLRenderer({ canvas: aptCanvas, antialias: true });
+  aptRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  aptRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  aptRenderer.localClippingEnabled = true;
+  aptScene = new THREE.Scene();
+  aptScene.background = new THREE.Color(0xf1eee7);
+  aptCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 200);
+  aptCamera.position.set(8, 6, 8);
+  aptScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  aptScene.add(new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl.position.set(10, 15, 8);
+  aptScene.add(dl);
+  const dl2 = new THREE.DirectionalLight(0xffffff, 0.5);
+  dl2.position.set(-12, -6, -10);
+  aptScene.add(dl2);
+  aptControls = new OrbitControls(aptCamera, aptCanvas);
+  aptControls.enableDamping = true;
+  aptControls.dampingFactor = 0.08;
+}
+
+function aptResize() {
+  if (!aptRenderer) return;
+  const r = aptCanvas.getBoundingClientRect();
+  aptRenderer.setSize(r.width, r.height, false);
+  aptCamera.aspect = r.width / r.height;
+  aptCamera.updateProjectionMatrix();
+}
+
+function aptAnimate() {
+  aptRAF = requestAnimationFrame(aptAnimate);
+  if (aptControls) aptControls.update();
+  if (aptRenderer && aptScene && aptCamera) aptRenderer.render(aptScene, aptCamera);
+}
+
+function buildAptTextureUrl(name) {
+  const isHouse = APT_HOUSE_TEXTURE_NAMES.includes(name);
+  return (isHouse ? APT_HOUSE_TEX_BASE : APT_TEX_BASE) + name + APT_TEX_SUFFIX;
+}
+
+/* ============================================================
+   ПОРТ ЛОГІКИ З voltaskai/apartment.js:
+   - we[i]  — overrides per normalized name
+   - be     — defaults: MeshBasicMaterial (бо roughness=1, metalness=0)
+   - _normalizeMeshName: strip Obj_ / _COLLIDE, lowercase, remove digits
+   - default side = DoubleSide
+   ============================================================ */
+const APT_MAT_OVERRIDES = {
+  sauna:           { side: 'front' },
+  ceiling:         { side: 'front' },
+  walls:           { side: 'front' },
+  saunawalls:      { side: 'front' },
+  outdoortable:    { side: 'double' },
+  umbrellas:       { side: 'double' },
+  ceilinglight:    { side: 'front', color: 0xffffff, material: 'basic', noTexture: true },
+  cutline:         { side: 'front', color: 0xb9b9b9, material: 'basic', noTexture: true },
+  joinerytop:      { side: 'front', color: 0xebdcd0, material: 'basic', noTexture: true },
+  kitchenled:      { color: 0xffffff, material: 'basic', noTexture: true },
+  monstera:        { alpha: true },
+  bubbles:         { transparent: true, opacity: 0.8 },
+  blackmetal:      { color: 0x3a3a3a, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  frames:          { color: 0x3a3a3a, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  intglaz:         { color: 0xebeced, material: 'standard', metalness: 0.15, roughness: 0.5, transparent: true, opacity: 0.2, noTexture: true },
+  intglass:        { side: 'double', color: 0xebeced, material: 'standard', metalness: 0.15, roughness: 0.5, transparent: true, opacity: 0.2, noTexture: true },
+  furnblack:       { color: 0x383838, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  gold:            { color: 0xb3831b, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  silver:          { color: 0xb1b0af, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  chairlegs:       { color: 0xc0bbb7, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  aptglaz:         { side: 'double', color: 0xDCDCE3, noTexture: true, metalness: 0, roughness: 1, transparent: true, opacity: 0.3, depthWrite: false, envMapIntensity: 0.25 },
+  girl:            { anisotropy: 100 },
+  doorhinges:      { color: 0xffffff, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  showerblack:     { side: 'double', color: 0x3a3a3a, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  bathroomtap:     { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  bathroomdrain:   { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  bathroomshower:  { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  doorhandles:     { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  bathroommirror:  { material: 'standard', metalness: 0.02, roughness: 0.02 },
+  kitchentap:      { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  wardrobehandles: { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  bathroomframes:  { color: 0xc28317, material: 'standard', metalness: 0.3, roughness: 0.25, noTexture: true },
+  kitchensink:     { color: 0x3a3a3a, material: 'standard', metalness: 0.15, roughness: 0.5, noTexture: true },
+  enterwalk:       { transparent: true, opacity: 0 },
+};
+const APT_MAT_DEFAULTS = {
+  transparent: false, opacity: 1, side: 'double', color: 0xffffff,
+  noTexture: false, metalness: 0, roughness: 1
+};
+function aptSideEnum(s) {
+  if (s === 'front') return THREE.FrontSide;
+  if (s === 'back')  return THREE.BackSide;
+  return THREE.DoubleSide;
+}
+function configureAptTexture(tex) {
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.flipY = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 16;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  return tex;
+}
+
+// url-сховище для текстур (за нормалізованим іменем)
+const aptTextureUrls = {};
+
+function loadAptTextures() {
+  if (aptMaterials) return aptMaterials;
+  aptMaterials = {};
+  const all = [...APT_TEXTURE_NAMES, ...APT_HOUSE_TEXTURE_NAMES];
+  all.forEach(name => {
+    const url = buildAptTextureUrl(name);
+    const lower = name.toLowerCase();
+    if (lower.startsWith('env')) {
+      const tex = texLoader.load(url, t => { t.mapping = THREE.EquirectangularReflectionMapping; });
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      aptMaterials.env = tex;
+      return;
+    }
+    // alias: зрізаємо "-X" або "-XX" суфікс (як voltaskai)
+    let alias = lower;
+    if (lower.charAt(lower.length-2) === '-') alias = lower.substring(0, lower.length-2);
+    else if (lower.charAt(lower.length-3) === '-') alias = lower.substring(0, lower.length-3);
+    aptTextureUrls[lower] = url;
+    if (alias !== lower) aptTextureUrls[alias] = url;
+  });
+  return aptMaterials;
+}
+
+function normalizeAptMeshName(name) {
+  let t = name.replace(/^Obj_/i, '').replace(/_COLLIDE$/i, '').toLowerCase();
+  if (!t.includes('apartment_')) {
+    t = t.replace(/[\._\s]\d+/g, '').replace(/_\d+$/, '');
+  }
+  return t;
+}
+
+function createAptMaterial(key, extraOpts = {}) {
+  const cached = aptMaterials[key];
+  if (cached) return cached;
+  const cfg = { ...APT_MAT_DEFAULTS, ...(APT_MAT_OVERRIDES[key] || {}), ...extraOpts };
+  const sideEnum = aptSideEnum(cfg.side);
+  const transparent = !!(cfg.transparent || cfg.opacity < 1 || cfg.alpha);
+  const alphaExtra = cfg.alpha ? { alphaTest: 0.5 } : {};
+  const isStandard = cfg.metalness > 0 || cfg.roughness < 1;
+  let mat;
+  if (isStandard) {
+    mat = new THREE.MeshStandardMaterial({
+      color: cfg.color, side: sideEnum,
+      transparent, opacity: cfg.opacity,
+      metalness: cfg.metalness, roughness: cfg.roughness,
+      ...(cfg.depthWrite === false ? { depthWrite: false } : {}),
+      ...alphaExtra,
+    });
+    if (cfg.envMap || aptMaterials.env) {
+      mat.envMap = cfg.envMap || aptMaterials.env;
+      mat.envMapIntensity = cfg.envMapIntensity ?? 1;
+    }
+  } else {
+    mat = new THREE.MeshBasicMaterial({
+      color: cfg.color, side: sideEnum,
+      transparent, opacity: cfg.opacity,
+      ...(cfg.depthWrite === false ? { depthWrite: false } : {}),
+      ...alphaExtra,
+    });
+  }
+  aptMaterials[key] = mat;
+
+  // підвантажити текстуру (якщо є і не noTexture)
+  const url = aptTextureUrls[key];
+  if (!cfg.noTexture && url) {
+    texLoader.load(url, tex => {
+      configureAptTexture(tex);
+      if (cfg.anisotropy) tex.anisotropy = cfg.anisotropy;
+      mat.map = tex;
+      mat.needsUpdate = true;
+    });
+  }
+  return mat;
+}
+
+function applyAptMaterials(root) {
+  loadAptTextures();
+  window.__aptModelRoot = root;
+  window.__aptCamera = aptCamera;
+  window.__aptControls = aptControls;
+  const missing = new Set();
+  root.traverse(s => {
+    if (!s.isMesh || !s.name) return;
+    const key = normalizeAptMeshName(s.name);
+    if (!key) return;
+
+    if (key.startsWith('enterwalk') || key === 'centerpoint' || key.startsWith('centerpoint')) {
+      s.visible = false;
+      return;
+    }
+
+    // якщо є texture URL (з модифікаторами) — підвантажить її автоматично;
+    // інакше створиться матеріал з overrides або defaults (білий MeshBasic)
+    const extra = key === 'aptglaz' && aptMaterials.env
+      ? { envMap: aptMaterials.env, envMapIntensity: 1 } : {};
+    const mat = createAptMaterial(key, extra);
+    if (mat) s.material = mat;
+    else missing.add(s.name);
+  });
+  if (missing.size) console.log('Apartment no-mat:', [...missing]);
+}
+
+let aptClipPlane = null;
+let aptClipCutY = 0;
+function frameAptModel(root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const dist = maxDim / (2 * Math.tan(Math.PI * aptCamera.fov / 360));
+  aptControls.target.copy(center);
+  // top-down з невеликим нахилом — як на референсі voltaskai
+  aptCamera.position.set(center.x + dist*0.35, center.y + dist*1.15, center.z + dist*0.55);
+  aptCamera.near = maxDim / 100;
+  aptCamera.far = maxDim * 100;
+  aptCamera.updateProjectionMatrix();
+  aptControls.minDistance = maxDim * 0.2;
+  aptControls.maxDistance = maxDim * 4;
+  aptControls.update();
+
+  // ріжемо стелю: лишаємо ~99% висоти квартири (тонкий зріз зверху)
+  aptClipCutY = box.min.y + size.y * 0.99;
+  aptClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), aptClipCutY);
+}
+
+let aptModelCache = null;
+function loadAptModelOnce() {
+  if (aptModelCache) return Promise.resolve(aptModelCache);
+  return new Promise((resolve, reject) => {
+    loader.load(APARTMENT_MODEL_URL, (gltf) => {
+      aptModelCache = gltf.scene;
+      applyAptMaterials(aptModelCache);
+      resolve(aptModelCache);
+    }, undefined, reject);
+  });
+}
+
+function openApartmentModal(apt) {
+  document.getElementById('apt-modal-title').textContent = 'Apartment ' + (apt.number || '—');
+  document.getElementById('apt-modal-floor').textContent = apt.floor ?? '—';
+  document.getElementById('apt-modal-rooms').textContent = apt.rooms_count ?? '—';
+  document.getElementById('apt-modal-size').textContent  = apt.area_size ?? '—';
+  document.getElementById('apt-modal-price').innerHTML = apt.price_formatted ?? '—';
+
+  aptModal.classList.add('show');
+  aptLoading.classList.remove('hidden');
+  initAptScene();
+  aptResize();
+  if (!aptRAF) aptAnimate();
+
+  loadAptModelOnce().then(root => {
+    if (aptModelRoot && aptModelRoot !== root) aptScene.remove(aptModelRoot);
+    aptModelRoot = root;
+    if (!aptScene.children.includes(root)) aptScene.add(root);
+    frameAptModel(root);
+    applyAptClipping();
+    aptLoading.classList.add('hidden');
+  }).catch(err => {
+    aptLoading.textContent = 'Failed to load apartment model';
+    console.error(err);
+  });
+}
+
+function closeApartmentModal() {
+  aptModal.classList.remove('show');
+  if (aptRAF) { cancelAnimationFrame(aptRAF); aptRAF = null; }
+}
+function applyAptClipping() {
+  aptRenderer.clippingPlanes = [];
+}
+document.getElementById('apt-modal-close').addEventListener('click', closeApartmentModal);
+aptModal.addEventListener('click', e => { if (e.target === aptModal) closeApartmentModal(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeApartmentModal(); });
+addEventListener('resize', aptResize);
+
+/* ============================================================
+   КРОК 7. ЦИКЛ РЕНДЕРИНГУ
+   ============================================================ */
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

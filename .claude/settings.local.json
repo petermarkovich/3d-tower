@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://voltaskai.endover.ee/wp-content/themes/volta-skai/public/build/assets/three-d-DtmEVZdb.js\" -o /tmp/three-d.js)",
+      "Read(//tmp/**)",
+      "Bash(grep -oE '\"[a-z_0-9]+\\\\.\\(jpg|png\\)\"' /tmp/three-d.js | sort -u)",
+      "Bash(grep -oE 'loadTextures\\\\\\(\\\\\\)\\\\{.{0,1500}' /tmp/three-d.js)",
+      "Bash(grep -oE '\"[a-z_]+\"|`[a-z_]+`' /tmp/apt-walk.js)",
+      "Bash(grep -oE '\\\\.\\(visible|isMesh\\)[^,;{}]{0,150}' /tmp/apt-walk.js)",
+      "Bash(grep -oE 'we=\\\\{[^}]{500,2000}\\\\}' /tmp/apt-walk.js)",
+      "Bash(python3 -c ' *)",
+      "Bash(grep -oE 'getTextureName[^}]{0,400}' /tmp/apt-walk.js)",
+      "Bash(grep -oE '_normalizeMeshName\\\\\\(e\\\\\\)\\\\{[^}]{0,500}' /tmp/apt-walk.js)",
+      "Bash(grep -oE '.{80}\\(loadTextures|extractName|baseName|split\\\\\\(\"/\"\\)[^}]{0,200}' /tmp/apt-walk.js)",
+      "Bash(curl -s \"https://wsrv.nl/?url=https%3A%2F%2Fvoltaskai.endover.ee%2Fwp-content%2Fuploads%2F2025%2F09%2Ffacade-5.jpg&quality=90&output=webp\" -o /tmp/facade-5.webp)"
+    ]
+  }
+}
