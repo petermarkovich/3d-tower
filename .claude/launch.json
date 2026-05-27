@@ -3,9 +3,10 @@
   "configurations": [
     {
       "name": "tower",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8181"],
-      "port": 8181
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8181,
+      "autoPort": true
     }
   ]
 }
