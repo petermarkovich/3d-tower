@@ -12,7 +12,9 @@
       "Bash(grep -oE 'getTextureName[^}]{0,400}' /tmp/apt-walk.js)",
       "Bash(grep -oE '_normalizeMeshName\\\\\\(e\\\\\\)\\\\{[^}]{0,500}' /tmp/apt-walk.js)",
       "Bash(grep -oE '.{80}\\(loadTextures|extractName|baseName|split\\\\\\(\"/\"\\)[^}]{0,200}' /tmp/apt-walk.js)",
-      "Bash(curl -s \"https://wsrv.nl/?url=https%3A%2F%2Fvoltaskai.endover.ee%2Fwp-content%2Fuploads%2F2025%2F09%2Ffacade-5.jpg&quality=90&output=webp\" -o /tmp/facade-5.webp)"
+      "Bash(curl -s \"https://wsrv.nl/?url=https%3A%2F%2Fvoltaskai.endover.ee%2Fwp-content%2Fuploads%2F2025%2F09%2Ffacade-5.jpg&quality=90&output=webp\" -o /tmp/facade-5.webp)",
+      "Bash(sed -i '' '1266,1382d' /Users/petromarkovich/work/tower/index.html)",
+      "Bash(sed -n '1264,1270p' /Users/petromarkovich/work/tower/index.html)"
     ]
   }
 }
