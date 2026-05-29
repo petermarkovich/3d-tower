@@ -1,12 +1,15 @@
 'use client';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import type { Apartment } from '@/lib/types';
-import { useApartments, DEFAULT_FILTERS, type Filters } from '@/lib/useApartments';
+import { useApartments, DEFAULT_FILTERS, computeBounds, type Filters } from '@/lib/useApartments';
+import { useFavorites } from '@/lib/useFavorites';
+import { useDeferredMount } from '@/lib/useDeferredMount';
 import { FiltersPanel } from '@/components/FiltersPanel';
 import { ApartmentTable } from '@/components/ApartmentTable';
 import { HoverCard } from '@/components/HoverCard';
-import { ApartmentModal } from '@/components/ApartmentModal';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 // Three.js потрібен лише на клієнті
 const BuildingScene = dynamic(
@@ -15,12 +18,19 @@ const BuildingScene = dynamic(
 );
 
 export default function Home() {
+  const router = useRouter();
   const apartments = useApartments();
+  const favorites = useFavorites();
+  const sceneReady = useDeferredMount();
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const bounds = useMemo(() => computeBounds(apartments), [apartments]);
   const [hoveredApt, setHoveredApt] = useState<Apartment | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [modalApt, setModalApt] = useState<Apartment | null>(null);
   const [activeTab, setActiveTab] = useState<'360' | 'plans' | 'location'>('360');
+
+  const openApartment = useCallback((apt: Apartment) => {
+    router.push(`/apartament/${apt.id}`);
+  }, [router]);
 
   const onHover3D = useCallback((apt: Apartment | null, x?: number, y?: number) => {
     setHoveredApt(apt);
@@ -33,47 +43,42 @@ export default function Home() {
 
   return (
     <>
-      <header className="top">
-        <div className="nav-left"><span>📞</span> Contact us</div>
-        <div className="brand">
-          <div className="small">Volta</div>
-          <div className="big">SKAI</div>
-        </div>
-        <div className="nav-right">Menu</div>
-      </header>
-
-      <div className="title-wrap">
-        <h1>Krulli 10</h1>
-        <div className="tabs">
-          <button className={activeTab === '360' ? 'active' : ''} onClick={() => setActiveTab('360')}>360 model</button>
-          <button className={activeTab === 'plans' ? 'active' : ''} onClick={() => setActiveTab('plans')}>Floorplans</button>
-          <button className={activeTab === 'location' ? 'active' : ''} onClick={() => setActiveTab('location')}>Location</button>
-        </div>
+      <div className="fixed left-1/2 top-[88px] z-20 -translate-x-1/2 text-center">
+        <h1 className="mb-3 font-serif text-[40px] font-normal text-foreground">Krulli 10</h1>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+          <TabsList className="rounded-full bg-card p-1">
+            <TabsTrigger value="360" className="rounded-full px-5 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">360 model</TabsTrigger>
+            <TabsTrigger value="plans" className="rounded-full px-5 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Floorplans</TabsTrigger>
+            <TabsTrigger value="location" className="rounded-full px-5 text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Location</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      <FiltersPanel filters={filters} setFilters={setFilters} />
+      <FiltersPanel filters={filters} setFilters={setFilters} bounds={bounds} />
 
-      <BuildingScene
-        apartments={apartments}
-        hoveredId={hoveredApt?.id ?? null}
-        onHoverApartment={onHover3D}
-        onClickApartment={(apt) => setModalApt(apt)}
-        paused={modalApt !== null}
-      />
+      {sceneReady && (
+        <BuildingScene
+          apartments={apartments}
+          hoveredId={hoveredApt?.id ?? null}
+          onHoverApartment={onHover3D}
+          onClickApartment={openApartment}
+        />
+      )}
 
       <HoverCard apartment={hoveredApt} x={pointer.x} y={pointer.y} />
 
       <ApartmentTable
         apartments={apartments}
         filters={filters}
+        favorites={favorites.set}
         hoveredId={hoveredApt?.id ?? null}
         onHover={onHoverTable}
-        onClick={(apt) => setModalApt(apt)}
+        onClick={openApartment}
       />
 
-      <div id="status-bar">{apartments.length} apartments</div>
-
-      <ApartmentModal apartment={modalApt} onClose={() => setModalApt(null)} />
+      <div className="fixed bottom-[18px] left-6 z-10 text-[11px] text-ink-mute">
+        {apartments.length} apartments
+      </div>
     </>
   );
 }

@@ -85,6 +85,7 @@ export interface ApartmentMaterials {
   env?: THREE.Texture;
   enterwalkPos: THREE.Vector3 | null;
   floorMeshes: THREE.Mesh[];
+  wallMeshes: THREE.Mesh[];
 }
 
 function normalizeMeshName(name: string): string {
@@ -170,6 +171,7 @@ export function applyApartmentMaterials(root: THREE.Object3D): ApartmentMaterial
 
   let enterwalkPos: THREE.Vector3 | null = null;
   const floorMeshes: THREE.Mesh[] = [];
+  const wallMeshes: THREE.Mesh[] = [];
 
   root.traverse((s) => {
     if (!(s as THREE.Mesh).isMesh || !s.name) return;
@@ -189,11 +191,13 @@ export function applyApartmentMaterials(root: THREE.Object3D): ApartmentMaterial
       return;
     }
     if (key.includes('floor')) floorMeshes.push(mesh);
+    // walls + cutline (зовнішня оболонка) + facade — це колізійні поверхні
+    if (key === 'walls' || key === 'cutline' || key === 'facade') wallMeshes.push(mesh);
 
     const extra: Partial<MatConfig> = key === 'aptglaz' && env ? { envMap: env, envMapIntensity: 1 } : {};
     const mat = createMaterial(key, extra);
     if (mat) mesh.material = mat;
   });
 
-  return { materials, env, enterwalkPos, floorMeshes };
+  return { materials, env, enterwalkPos, floorMeshes, wallMeshes };
 }

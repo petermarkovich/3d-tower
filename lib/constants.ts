@@ -42,3 +42,8 @@ export function aptTextureUrl(name: string): string {
   const isHouse = (APT_HOUSE_TEXTURE_NAMES as readonly string[]).includes(name);
   return (isHouse ? APT_HOUSE_TEX_BASE : APT_TEX_BASE) + name + APT_TEX_SUFFIX;
 }
+
+/* Floorplan SVG (універсальне посилання за номером квартири) */
+export function floorplanUrl(number: string | number): string {
+  return `https://voltaskai.endover.ee/wp-content/uploads/2026/01/${number}.svg`;
+}

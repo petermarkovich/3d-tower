@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  experimental: {
+    // нативний View Transitions API — кросфейд між сторінками
+    viewTransition: true,
+  },
 };
 
 export default nextConfig;

@@ -101,7 +101,7 @@ function Model({ apartments, hoveredId, onHoverApartment, onClickApartment }: Sc
     if (on) {
       const st = (mesh.userData.apt as Apartment | undefined)?.status;
       if (st === 'booked' || st === 'sold') { m.color.set('#e3cdbb'); m.opacity = 0.8; }
-      else { m.color.set('#B0734E'); m.opacity = 0.6; }
+      else { m.color.set('#a36752'); m.opacity = 0.6; }
     } else {
       m.color.set('#ffffff'); m.opacity = 0;
     }
@@ -131,14 +131,28 @@ function Model({ apartments, hoveredId, onHoverApartment, onClickApartment }: Sc
         }
       }
     };
+    // розрізняємо клік від обертання: рахуємо зсув між down/up,
+    // якщо камеру перетягнули (>5px) — це drag, клік не відкриває апартамент
+    let downX = 0, downY = 0, dragged = false;
+    const onPointerDown = (e: PointerEvent) => {
+      downX = e.clientX; downY = e.clientY; dragged = false;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) dragged = true;
+    };
     const onClick = () => {
+      if (dragged) return;
       const hit = hoveredMeshRef.current;
       if (hit && hit.userData.apt) onClickApartment(hit.userData.apt as Apartment);
     };
     gl.domElement.addEventListener('pointermove', onMove);
+    gl.domElement.addEventListener('pointerdown', onPointerDown);
+    gl.domElement.addEventListener('pointerup', onPointerUp);
     gl.domElement.addEventListener('click', onClick);
     return () => {
       gl.domElement.removeEventListener('pointermove', onMove);
+      gl.domElement.removeEventListener('pointerdown', onPointerDown);
+      gl.domElement.removeEventListener('pointerup', onPointerUp);
       gl.domElement.removeEventListener('click', onClick);
     };
   }, [camera, gl, raycaster, pointer, onHoverApartment, onClickApartment]);
@@ -181,7 +195,7 @@ export function BuildingScene(props: SceneProps) {
       camera={{ fov: 45, near: 0.1, far: 2000, position: [10, 8, 14] }}
       gl={{ antialias: true, outputColorSpace: THREE.SRGBColorSpace, powerPreference: 'high-performance' }}
     >
-      <color attach="background" args={[0xfafaf8]} />
+      <color attach="background" args={[0xf4ebe4]} />
       <SceneLights />
       <Suspense fallback={null}>
         <Model {...props} />

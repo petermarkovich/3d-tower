@@ -16,7 +16,7 @@ type OrbitControlsImpl = {
 };
 
 interface InteriorProps {
-  onLoad: (info: { enterwalkPos: THREE.Vector3 | null; floorMeshes: THREE.Mesh[]; boxY: { min: number; max: number } }) => void;
+  onLoad: (info: { enterwalkPos: THREE.Vector3 | null; floorMeshes: THREE.Mesh[]; wallMeshes: THREE.Mesh[]; boxY: { min: number; max: number } }) => void;
 }
 
 function Interior({ onLoad }: InteriorProps) {
@@ -43,18 +43,16 @@ function Interior({ onLoad }: InteriorProps) {
       const maxDim = Math.max(size.x, size.y, size.z);
       const fov = camera.fov;
       const dist = maxDim / (2 * Math.tan(Math.PI * fov / 360));
-      const pos = new THREE.Vector3(
-        center.x + dist * 0.35,
-        center.y + dist * 1.15,
-        center.z + dist * 0.55,
-      );
+      // ракурс як на головній сцені: ~3/4 з невеликим нахилом згори
+      const dir = new THREE.Vector3(0.9, 0.5, 0.9).normalize();
+      const pos = center.clone().add(dir.multiplyScalar(dist * 0.95));
       camera.near = maxDim / 100;
       camera.far = maxDim * 100;
       camera.updateProjectionMatrix();
-      pendingFrame.current = { pos, target: center.clone(), minDist: maxDim * 0.2, maxDist: maxDim * 4 };
+      pendingFrame.current = { pos, target: center.clone(), minDist: dist, maxDist: dist };
 
       setRoot(r);
-      onLoadRef.current({ enterwalkPos: mats.enterwalkPos, floorMeshes: mats.floorMeshes, boxY: { min: box.min.y, max: box.max.y } });
+      onLoadRef.current({ enterwalkPos: mats.enterwalkPos, floorMeshes: mats.floorMeshes, wallMeshes: mats.wallMeshes, boxY: { min: box.min.y, max: box.max.y } });
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,9 +87,13 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
   const { camera, gl, controls } = useThree() as unknown as { camera: THREE.PerspectiveCamera; gl: THREE.WebGLRenderer; controls: { target: THREE.Vector3; enabled: boolean; autoRotate: boolean; update: () => void; minDistance: number; maxDistance: number } };
   const enterwalkPos = useRef<THREE.Vector3 | null>(null);
   const floorMeshes = useRef<THREE.Mesh[]>([]);
+  const wallMeshes = useRef<THREE.Mesh[]>([]);
   const walkMode = useRef(false);
   const walkYaw = useRef(0);
   const walkPitch = useRef(0);
+  // цільові кути (куди тягне миша) — camera плавно доганяє їх у useFrame
+  const walkYawTarget = useRef(0);
+  const walkPitchTarget = useRef(0);
   const walkTween = useRef<{ from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null>(null);
   const orbitSave = useRef<{ pos: THREE.Vector3; target: THREE.Vector3; fov: number; autoRotate: boolean } | null>(null);
   const modelBoxY = useRef<{ min: number; max: number } | null>(null);
@@ -131,6 +133,8 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
     lookDir.normalize();
     walkYaw.current = Math.atan2(lookDir.x, lookDir.z);
     walkPitch.current = 0;
+    walkYawTarget.current = walkYaw.current;
+    walkPitchTarget.current = 0;
     applyWalkLook();
     camera.fov = 75;
     camera.updateProjectionMatrix();
@@ -163,7 +167,7 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
     let dragMoved = false;
     const onMouseDown = (e: MouseEvent) => {
       if (!walkMode.current) return;
-      drag = { x: e.clientX, y: e.clientY, yaw: walkYaw.current, pitch: walkPitch.current };
+      drag = { x: e.clientX, y: e.clientY, yaw: walkYawTarget.current, pitch: walkPitchTarget.current };
       dragMoved = false;
       gl.domElement.style.cursor = 'grabbing';
     };
@@ -173,9 +177,9 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
       const dy = e.clientY - drag.y;
       if (Math.hypot(dx, dy) > 4) dragMoved = true;
       const sens = 0.005;
-      walkYaw.current = drag.yaw - dx * sens;
-      walkPitch.current = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, drag.pitch - dy * sens));
-      applyWalkLook();
+      // ставимо лише ціль — camera плавно доганяє у useFrame
+      walkYawTarget.current = drag.yaw - dx * sens;
+      walkPitchTarget.current = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, drag.pitch - dy * sens));
     };
     const onMouseUp = (e: MouseEvent) => {
       if (!walkMode.current || !drag) return;
@@ -194,11 +198,53 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
       const hits = raycaster.intersectObjects(targets, false);
       if (!hits.length) return;
       const p = hits[0].point;
-      walkTween.current = {
-        from: camera.position.clone(),
-        to: new THREE.Vector3(p.x, eyeHeight(), p.z),
-        t: 0, dur: 0.7,
-      };
+      const eyeY = eyeHeight();
+      const from = camera.position.clone();
+      let to = new THREE.Vector3(p.x, eyeY, p.z);
+
+      // wall collision: горизонтальний рейкаст від поточної позиції до цілі
+      // на висоті очей. Якщо стіна перетинає шлях — стоп на RADIUS до неї.
+      const RADIUS = 0.5;
+      const dir = new THREE.Vector3().subVectors(to, from);
+      const dist = dir.length();
+      if (dist > 1e-4 && wallMeshes.current.length) {
+        dir.divideScalar(dist);
+        const wallRay = new THREE.Raycaster(from, dir, 0, dist);
+        const wallHits = wallRay.intersectObjects(wallMeshes.current, false);
+        if (wallHits.length) {
+          const stop = Math.max(0, wallHits[0].distance - RADIUS);
+          to = from.clone().add(dir.multiplyScalar(stop));
+          to.y = eyeY;
+        }
+      }
+
+      // clearance: відштовхуємо ціль від будь-яких стін ближче за RADIUS,
+      // щоб не можна було підійти впритул (8 напрямків, кілька ітерацій)
+      if (wallMeshes.current.length) {
+        const DIRS: THREE.Vector3[] = [];
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          DIRS.push(new THREE.Vector3(Math.cos(a), 0, Math.sin(a)));
+        }
+        const probe = new THREE.Raycaster();
+        for (let iter = 0; iter < 4; iter++) {
+          let pushed = false;
+          for (const d of DIRS) {
+            probe.set(to, d);
+            probe.far = RADIUS;
+            const h = probe.intersectObjects(wallMeshes.current, false);
+            if (h.length && h[0].distance < RADIUS) {
+              const push = RADIUS - h[0].distance;
+              to.addScaledVector(d, -push); // штовхаємо в протилежний від стіни бік
+              to.y = eyeY;
+              pushed = true;
+            }
+          }
+          if (!pushed) break;
+        }
+      }
+
+      walkTween.current = { from, to, t: 0, dur: 0.7 };
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && walkMode.current) exitWalkmode(); };
     gl.domElement.addEventListener('mousedown', onMouseDown);
@@ -225,6 +271,15 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
   };
 
   useFrame((_, dt) => {
+    if (walkMode.current) {
+      // плавне доганяння цільових кутів (експоненційне згладжування,
+      // незалежне від частоти кадрів)
+      const smooth = 1 - Math.exp(-8 * dt);
+      walkYaw.current += (walkYawTarget.current - walkYaw.current) * smooth;
+      walkPitch.current += (walkPitchTarget.current - walkPitch.current) * smooth;
+      applyWalkLook();
+    }
+
     if (walkMode.current && walkTween.current) {
       walkTween.current.t += dt / walkTween.current.dur;
       const k = Math.min(1, walkTween.current.t);
@@ -251,9 +306,10 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
     }
   });
 
-  const handleInteriorLoad = (info: { enterwalkPos: THREE.Vector3 | null; floorMeshes: THREE.Mesh[]; boxY: { min: number; max: number } }) => {
+  const handleInteriorLoad = (info: { enterwalkPos: THREE.Vector3 | null; floorMeshes: THREE.Mesh[]; wallMeshes: THREE.Mesh[]; boxY: { min: number; max: number } }) => {
     enterwalkPos.current = info.enterwalkPos;
     floorMeshes.current = info.floorMeshes;
+    wallMeshes.current = info.wallMeshes;
     modelBoxY.current = info.boxY;
   };
 
@@ -266,14 +322,22 @@ function SceneInner({ apiRef, onWalkmodeChange, onIconPos }: SceneProps) {
       <Suspense fallback={null}>
         <Interior onLoad={handleInteriorLoad} />
       </Suspense>
-      <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+      <OrbitControls
+        makeDefault
+        enableDamping
+        dampingFactor={0.08}
+        enableZoom={false}
+        autoRotate
+        autoRotateSpeed={0.5}
+      />
     </>
   );
 }
 
-export function ApartmentScene(props: SceneProps) {
+export function ApartmentScene({ paused, ...props }: SceneProps & { paused?: boolean }) {
   return (
     <Canvas
+      frameloop={paused ? 'never' : 'always'}
       camera={{ fov: 45, position: [8, 6, 8] }}
       gl={{
         antialias: true,
@@ -281,7 +345,7 @@ export function ApartmentScene(props: SceneProps) {
         powerPreference: 'high-performance',
       }}
     >
-      <color attach="background" args={[0xf1eee7]} />
+      <color attach="background" args={[0xf4ebe4]} />
       <SceneInner {...props} />
     </Canvas>
   );

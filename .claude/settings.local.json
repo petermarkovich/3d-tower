@@ -18,7 +18,13 @@
       "Bash(npm install *)",
       "Bash(npx next *)",
       "mcp__plugin_context7_context7__query-docs",
-      "Bash(kill 78629)"
+      "Bash(kill 78629)",
+      "Bash(npx tsc *)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "Bash(npx --yes shadcn@latest add button tabs checkbox slider toggle-group table)",
+      "Bash(npm run *)",
+      "Bash(node -e \"console.log\\('react', require\\('react/package.json'\\).version\\)\")",
+      "Bash(node -e \"const r=require\\('react'\\); console.log\\('ViewTransition:', typeof r.ViewTransition, '| unstable_ViewTransition:', typeof r.unstable_ViewTransition\\)\")"
     ]
   }
 }
